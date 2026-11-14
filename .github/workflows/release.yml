@@ -21,12 +21,12 @@ jobs:
       matrix:
         include:
           - platform_name: macOS-Apple-Silicon-arm64
-            os: macos-14
+            os: macos-latest
             target: aarch64-apple-darwin
             artifact_name: NMEA-Studio-macOS-arm64
 
           - platform_name: macOS-Intel-x86_64
-            os: macos-14
+            os: macos-latest
             target: x86_64-apple-darwin
             artifact_name: NMEA-Studio-macOS-x86_64
 
@@ -70,7 +70,7 @@ jobs:
           key: release-${{ matrix.target }}
 
       - name: Run unit tests
-        run: cargo test --target ${{ matrix.target }}
+        run: cargo test
 
       - name: Build optimized Release GUI binary
         run: cargo build --release --target ${{ matrix.target }}
