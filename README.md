@@ -73,7 +73,16 @@ cargo run
 
 # Build optimized release binary (macOS, Linux, Windows)
 cargo build --release
+
+# Build native macOS "NMEA Studio.app" bundle (launches from Finder with no Terminal window)
+./scripts/bundle-macos-app.sh
 ```
+
+### Cross-Platform GUI Packaging (No Terminal / Console Window)
+- **Windows (`x86_64-pc-windows-msvc`)**: Compiled with `#![cfg_attr(not(test), windows_subsystem = "windows")]` so launching `NMEA Studio.exe` opens the GUI directly with no console prompt.
+- **macOS (`aarch64-apple-darwin` & `x86_64-apple-darwin`)**: Packaged as a native **`NMEA Studio.app`** bundle and **`.dmg`** disk image so Finder launches it as a native macOS app without opening `Terminal.app`.
+- **Linux (`x86_64-unknown-linux-gnu`)**: Packaged as a `.tar.gz` archive including a FreeDesktop `nmea-studio.desktop` entry (`Terminal=false`).
+- **GitHub Actions CI/CD**: Automated workflows in `.github/workflows/ci.yml` and `.github/workflows/release.yml` test and build GUI bundles for all platforms on every push, pull request, or `v*` tag.
 
 ---
 

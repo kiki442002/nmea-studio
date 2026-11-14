@@ -1,0 +1,190 @@
+name: Release Multi-Platform GUI Bundles
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-release:
+    name: Release Build (${{ matrix.platform_name }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform_name: macOS-Apple-Silicon-arm64
+            os: macos-14
+            target: aarch64-apple-darwin
+            artifact_name: NMEA-Studio-macOS-arm64
+
+          - platform_name: macOS-Intel-x86_64
+            os: macos-14
+            target: x86_64-apple-darwin
+            artifact_name: NMEA-Studio-macOS-x86_64
+
+          - platform_name: Windows-x86_64
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact_name: NMEA-Studio-Windows-x86_64
+
+          - platform_name: Linux-x86_64
+            os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            artifact_name: NMEA-Studio-Linux-x86_64
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Linux GUI & Serial dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            pkg-config \
+            libudev-dev \
+            libssl-dev \
+            libxcb-render0-dev \
+            libxcb-shape0-dev \
+            libxcb-xfixes0-dev \
+            libxkbcommon-dev \
+            libgtk-3-dev \
+            libfontconfig1-dev
+
+      - name: Install Rust toolchain for target ${{ matrix.target }}
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: release-${{ matrix.target }}
+
+      - name: Run unit tests
+        run: cargo test --target ${{ matrix.target }}
+
+      - name: Build optimized Release GUI binary
+        run: cargo build --release --target ${{ matrix.target }}
+
+      # macOS: Package native .app bundle & .dmg (launches GUI without Terminal)
+      - name: Package macOS .app and .dmg
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP_DIR="dist/NMEA Studio.app"
+          mkdir -p "${APP_DIR}/Contents/MacOS"
+          mkdir -p "${APP_DIR}/Contents/Resources"
+
+          cp "target/${{ matrix.target }}/release/nmea-studio" "${APP_DIR}/Contents/MacOS/nmea-studio"
+          chmod +x "${APP_DIR}/Contents/MacOS/nmea-studio"
+
+          cat > "${APP_DIR}/Contents/Info.plist" << 'EOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>CFBundleName</key>
+              <string>NMEA Studio</string>
+              <key>CFBundleDisplayName</key>
+              <string>NMEA Studio</string>
+              <key>CFBundleIdentifier</key>
+              <string>com.nmeastudio.app</string>
+              <key>CFBundleVersion</key>
+              <string>0.1.0</string>
+              <key>CFBundleShortVersionString</key>
+              <string>0.1.0</string>
+              <key>CFBundlePackageType</key>
+              <string>APPL</string>
+              <key>CFBundleExecutable</key>
+              <string>nmea-studio</string>
+              <key>LSMinimumSystemVersion</key>
+              <string>11.0</string>
+              <key>NSHighResolutionCapable</key>
+              <true/>
+              <key>NSSupportsAutomaticGraphicsSwitching</key>
+              <true/>
+          </dict>
+          </plist>
+          EOF
+
+          ditto -c -k --sequesterRsrc --keepParent "${APP_DIR}" "dist/${{ matrix.artifact_name }}.app.zip"
+          hdiutil create -volname "NMEA Studio" -srcfolder "${APP_DIR}" -ov -format UDZO "dist/${{ matrix.artifact_name }}.dmg"
+
+      # Windows: Package GUI .exe (compiled with windows_subsystem = "windows")
+      - name: Package Windows .zip
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist/NMEA-Studio
+          Copy-Item "target/${{ matrix.target }}/release/nmea-studio.exe" "dist/NMEA-Studio/NMEA Studio.exe"
+          Copy-Item "README.md" "dist/NMEA-Studio/README.md"
+          Copy-Item "USER_MANUAL.md" "dist/NMEA-Studio/USER_MANUAL.md"
+          Compress-Archive -Path "dist/NMEA-Studio/*" -DestinationPath "dist/${{ matrix.artifact_name }}.zip" -Force
+
+      # Linux: Package binary + .desktop launcher (Terminal=false)
+      - name: Package Linux .tar.gz
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          PKG_DIR="dist/${{ matrix.artifact_name }}"
+          mkdir -p "${PKG_DIR}"
+
+          cp "target/${{ matrix.target }}/release/nmea-studio" "${PKG_DIR}/nmea-studio"
+          chmod +x "${PKG_DIR}/nmea-studio"
+          cp README.md USER_MANUAL.md "${PKG_DIR}/"
+
+          cat > "${PKG_DIR}/nmea-studio.desktop" << 'EOF'
+          [Desktop Entry]
+          Type=Application
+          Name=NMEA Studio
+          Comment=NMEA 0183 & NMEA 2000 Marine Simulator and Protocol Analyzer
+          Exec=nmea-studio
+          Terminal=false
+          Categories=Development;Science;Utility;
+          StartupNotify=true
+          EOF
+          chmod +x "${PKG_DIR}/nmea-studio.desktop"
+
+          tar -C dist -czf "dist/${{ matrix.artifact_name }}.tar.gz" "${{ matrix.artifact_name }}"
+
+      - name: Upload Release Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: |
+            dist/*.zip
+            dist/*.dmg
+            dist/*.tar.gz
+          if-no-files-found: error
+
+  publish-github-release:
+    name: Publish GitHub Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build-release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all platform artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: Create GitHub Release & attach platform bundles
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            release-assets/*.dmg
+            release-assets/*.zip
+            release-assets/*.tar.gz
