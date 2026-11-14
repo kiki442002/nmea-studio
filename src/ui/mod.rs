@@ -4523,13 +4523,23 @@ mod tests {
         app.project.vessel.vessel_name = "OCEAN EXPLORER".to_string();
         app.project.instruments.push(Instrument::new_custom(1));
 
-        let tmp_dir = "/tmp";
+        let tmp_file = std::env::temp_dir().join("unit_test_preset_no_ext");
+        let tmp_dir = tmp_file
+            .parent()
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
+        let expected_json = tmp_file
+            .with_extension("json")
+            .to_string_lossy()
+            .to_string();
+
         let mut dlg = ProjectFileDialog::default();
-        dlg.open_save("/tmp/unit_test_preset_no_ext");
+        dlg.open_save(&tmp_file.to_string_lossy());
         assert_eq!(dlg.mode, FileDialogMode::SaveProject);
         assert_eq!(dlg.current_dir, tmp_dir);
         // Should automatically append .json in SaveProject mode
-        assert_eq!(dlg.resolved_file_path(), "/tmp/unit_test_preset_no_ext.json");
+        assert_eq!(dlg.resolved_file_path(), expected_json);
 
         let save_path = dlg.resolved_file_path();
         app.save_project_to_path(&save_path).unwrap();
@@ -4542,7 +4552,7 @@ mod tests {
             .any(|e| e.name == "unit_test_preset_no_ext.json"));
 
         dlg.navigate_up();
-        dlg.navigate_to(tmp_dir);
+        dlg.navigate_to(&tmp_dir);
         assert_eq!(dlg.current_dir, tmp_dir);
 
         let mut app2 = NmeaStudioApp::default();

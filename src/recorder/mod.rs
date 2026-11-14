@@ -245,9 +245,10 @@ mod tests {
 
     #[test]
     fn test_record_to_file_and_load_file() {
-        let tmp_path = "/tmp/nmea_studio_unit_test_capture.log";
+        let tmp_path_buf = std::env::temp_dir().join("nmea_studio_unit_test_capture.log");
+        let tmp_path = tmp_path_buf.to_string_lossy().to_string();
         let mut rp = LogRecorderPlayer::default();
-        rp.record_file_path = tmp_path.to_string();
+        rp.record_file_path = tmp_path.clone();
         rp.record_tx = true;
         rp.record_rx = false;
 
@@ -266,13 +267,13 @@ mod tests {
         assert_eq!(rp.recorded_lines_count, 2);
 
         // Load back via load_file
-        rp.play_file_path = tmp_path.to_string();
+        rp.play_file_path = tmp_path.clone();
         rp.load_file();
         assert_eq!(
             rp.loaded_lines,
             vec!["$HCHDT,100.0,T*20", "$HCHDT,200.0,T*23"]
         );
 
-        let _ = std::fs::remove_file(tmp_path);
+        let _ = std::fs::remove_file(&tmp_path_buf);
     }
 }
