@@ -1,4 +1,4 @@
-# NMEA Studio
+# <img src="assets/icon.png" width="36" align="center" alt="NMEA Studio Logo" /> NMEA Studio
 
 A cross-platform **NMEA 0183 & NMEA 2000** simulator, traffic analyzer, and test studio inspired by **NemaStudio**, built natively in Rust with `eframe` / `egui` for **macOS, Linux, and Windows**.
 

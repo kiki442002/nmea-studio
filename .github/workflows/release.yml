@@ -87,6 +87,7 @@ jobs:
 
           cp "target/${{ matrix.target }}/release/nmea-studio" "${APP_DIR}/Contents/MacOS/nmea-studio"
           chmod +x "${APP_DIR}/Contents/MacOS/nmea-studio"
+          cp "assets/AppIcon.icns" "${APP_DIR}/Contents/Resources/AppIcon.icns"
 
           cat > "${APP_DIR}/Contents/Info.plist" << 'EOF'
           <?xml version="1.0" encoding="UTF-8"?>
@@ -107,6 +108,8 @@ jobs:
               <string>APPL</string>
               <key>CFBundleExecutable</key>
               <string>nmea-studio</string>
+              <key>CFBundleIconFile</key>
+              <string>AppIcon</string>
               <key>LSMinimumSystemVersion</key>
               <string>11.0</string>
               <key>NSHighResolutionCapable</key>
@@ -156,6 +159,7 @@ jobs:
 
           cp "target/${{ matrix.target }}/release/nmea-studio" "${PKG_DIR}/nmea-studio"
           chmod +x "${PKG_DIR}/nmea-studio"
+          cp "assets/icon.png" "${PKG_DIR}/icon.png"
           cp README.md USER_MANUAL.md "${PKG_DIR}/"
 
           cat > "${PKG_DIR}/nmea-studio.desktop" << 'EOF'
@@ -164,6 +168,7 @@ jobs:
           Name=NMEA Studio
           Comment=NMEA 0183 & NMEA 2000 Marine Simulator and Protocol Analyzer
           Exec=nmea-studio
+          Icon=icon
           Terminal=false
           Categories=Development;Science;Utility;
           StartupNotify=true

@@ -2,7 +2,7 @@ pub mod gauges;
 pub mod plotter;
 
 use chrono::Local;
-use egui::{Color32, RichText, ScrollArea, Ui};
+use egui::{Color32, Pos2, RichText, ScrollArea, Ui, Vec2};
 use egui_extras::{Column, Size, StripBuilder, TableBuilder};
 use rand::Rng;
 use std::fs;
@@ -740,6 +740,501 @@ pub fn matches_traffic_filter(
     true
 }
 
+/// Generates the NMEA Studio application icon (RGBA8 pixel buffer) at the requested square resolution.
+/// Renders an anti-aliased nautical radar & 8-point compass rose badge inside a rounded squircle.
+pub fn generate_app_logo_rgba(size: u32) -> egui::IconData {
+    let size = size.max(16);
+    let mut rgba = vec![0u8; (size * size * 4) as usize];
+    let s = size as f32;
+    let half = s * 0.5;
+
+    // Helper: signed distance to a 2D line segment (ax, ay) -> (bx, by)
+    let dist_to_segment = |px: f32, py: f32, ax: f32, ay: f32, bx: f32, by: f32| -> f32 {
+        let vx = bx - ax;
+        let vy = by - ay;
+        let wx = px - ax;
+        let wy = py - ay;
+        let len_sq = vx * vx + vy * vy;
+        let t = if len_sq > 1e-6 {
+            ((wx * vx + wy * vy) / len_sq).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        let dx = px - (ax + t * vx);
+        let dy = py - (ay + t * vy);
+        (dx * dx + dy * dy).sqrt()
+    };
+
+    // Helper: point-in-triangle with anti-aliased edge distance
+    let triangle_coverage =
+        |px: f32, py: f32, ax: f32, ay: f32, bx: f32, by: f32, cx: f32, cy: f32| -> f32 {
+            let e0 = (px - bx) * (ay - by) - (ax - bx) * (py - by);
+            let e1 = (px - cx) * (by - cy) - (bx - cx) * (py - cy);
+            let e2 = (px - ax) * (cy - ay) - (cx - ax) * (py - ay);
+            let inside = (e0 >= 0.0 && e1 >= 0.0 && e2 >= 0.0)
+                || (e0 <= 0.0 && e1 <= 0.0 && e2 <= 0.0);
+            let d0 = dist_to_segment(px, py, ax, ay, bx, by);
+            let d1 = dist_to_segment(px, py, bx, by, cx, cy);
+            let d2 = dist_to_segment(px, py, cx, cy, ax, ay);
+            let min_d = d0.min(d1).min(d2);
+            let signed_d = if inside { min_d } else { -min_d };
+            (signed_d * half + 0.5).clamp(0.0, 1.0)
+        };
+
+    let blend = |dst: &mut [u8; 4], sr: f32, sg: f32, sb: f32, sa: f32| {
+        let sa = sa.clamp(0.0, 1.0);
+        if sa <= 0.0 {
+            return;
+        }
+        let da = dst[3] as f32 / 255.0;
+        let out_a = sa + da * (1.0 - sa);
+        if out_a > 1e-5 {
+            let dr = dst[0] as f32 / 255.0;
+            let dg = dst[1] as f32 / 255.0;
+            let db = dst[2] as f32 / 255.0;
+            let or = (sr * sa + dr * da * (1.0 - sa)) / out_a;
+            let og = (sg * sa + dg * da * (1.0 - sa)) / out_a;
+            let ob = (sb * sa + db * da * (1.0 - sa)) / out_a;
+            dst[0] = (or.clamp(0.0, 1.0) * 255.0).round() as u8;
+            dst[1] = (og.clamp(0.0, 1.0) * 255.0).round() as u8;
+            dst[2] = (ob.clamp(0.0, 1.0) * 255.0).round() as u8;
+            dst[3] = (out_a.clamp(0.0, 1.0) * 255.0).round() as u8;
+        }
+    };
+
+    for y in 0..size {
+        for x in 0..size {
+            // Normalized coordinates in [-1.0, 1.0], +x right, +y down
+            let nx = ((x as f32 + 0.5) - half) / half;
+            let ny = ((y as f32 + 0.5) - half) / half;
+            let r = (nx * nx + ny * ny).sqrt();
+
+            // Rounded squircle SDF
+            let box_half = 0.88;
+            let corner_r = 0.24;
+            let qx = nx.abs() - (box_half - corner_r);
+            let qy = ny.abs() - (box_half - corner_r);
+            let squircle_sdf =
+                (qx.max(0.0).powi(2) + qy.max(0.0).powi(2)).sqrt() + qx.max(qy).min(0.0) - corner_r;
+
+            let aa = 2.0 / s;
+            let bg_alpha = ((0.0 - squircle_sdf) / aa + 0.5).clamp(0.0, 1.0);
+            if bg_alpha <= 0.0 {
+                continue;
+            }
+
+            let mut pix = [0u8; 4];
+
+            // 1. Deep Nautical Midnight-Blue radial background gradient
+            let vignette = (1.0 - (r * 0.72).clamp(0.0, 1.0)).powf(1.2);
+            let bg_r = 0.02 + 0.06 * vignette;
+            let bg_g = 0.07 + 0.16 * vignette;
+            let bg_b = 0.14 + 0.28 * vignette;
+            blend(&mut pix, bg_r, bg_g, bg_b, bg_alpha);
+
+            // 2. Outer squircle metallic cyan rim
+            let rim_dist = (squircle_sdf + 0.025).abs();
+            let rim_alpha = ((0.022 - rim_dist) / aa).clamp(0.0, 1.0) * bg_alpha;
+            blend(&mut pix, 0.20, 0.78, 0.96, rim_alpha * 0.85);
+
+            // 3. Radar sweep glow in top-right sector (-75° to 0° in math angle -> NE quadrant)
+            if r < 0.74 {
+                let bearing_deg = nx.atan2(-ny).to_degrees().rem_euclid(360.0);
+                if bearing_deg <= 72.0 {
+                    let sweep_t = (bearing_deg / 72.0).powf(1.5);
+                    let radial_fade = (1.0 - (r / 0.74)).clamp(0.0, 1.0).powf(0.6);
+                    blend(
+                        &mut pix,
+                        0.08,
+                        0.88,
+                        0.72,
+                        sweep_t * radial_fade * 0.34 * bg_alpha,
+                    );
+                }
+            }
+
+            // 4. Concentric radar range rings (r = 0.74, 0.52, 0.30)
+            for &(ring_r, thick, alpha_mul) in &[
+                (0.74_f32, 0.016_f32, 0.90_f32),
+                (0.52_f32, 0.011_f32, 0.50_f32),
+                (0.30_f32, 0.010_f32, 0.40_f32),
+            ] {
+                let d_ring = (r - ring_r).abs();
+                let a_ring = ((thick - d_ring) / aa).clamp(0.0, 1.0) * alpha_mul * bg_alpha;
+                blend(&mut pix, 0.22, 0.82, 1.0, a_ring);
+            }
+
+            // 5. Compass degree ticks along the outer radar ring (every 30 degrees)
+            if (0.66..=0.75).contains(&r) {
+                let deg = nx.atan2(-ny).to_degrees().rem_euclid(360.0);
+                let nearest_30 = (deg / 30.0).round() * 30.0;
+                let angle_rad = nearest_30.to_radians();
+                let tx0 = angle_rad.sin() * 0.67;
+                let ty0 = -angle_rad.cos() * 0.67;
+                let tx1 = angle_rad.sin() * 0.74;
+                let ty1 = -angle_rad.cos() * 0.74;
+                let d_tick = dist_to_segment(nx, ny, tx0, ty0, tx1, ty1);
+                let a_tick = ((0.012 - d_tick) / aa).clamp(0.0, 1.0) * 0.75 * bg_alpha;
+                blend(&mut pix, 0.55, 0.92, 1.0, a_tick);
+            }
+
+            // 6. Subtle crosshair lines
+            if r < 0.74 {
+                let d_cross = nx.abs().min(ny.abs());
+                let a_cross = ((0.008 - d_cross) / aa).clamp(0.0, 1.0) * 0.28 * bg_alpha;
+                blend(&mut pix, 0.30, 0.85, 1.0, a_cross);
+            }
+
+            // 7. Intercardinal 4-point star (NE, SE, SW, NW) at 45°, length 0.44
+            for &deg in &[45.0_f32, 135.0, 225.0, 315.0] {
+                let rad = deg.to_radians();
+                let tip_x = rad.sin() * 0.45;
+                let tip_y = -rad.cos() * 0.45;
+                let left_rad = (deg - 90.0).to_radians();
+                let right_rad = (deg + 90.0).to_radians();
+                let w = 0.085;
+                let cov_l = triangle_coverage(
+                    nx,
+                    ny,
+                    0.0,
+                    0.0,
+                    tip_x,
+                    tip_y,
+                    left_rad.sin() * w,
+                    -left_rad.cos() * w,
+                );
+                let cov_r = triangle_coverage(
+                    nx,
+                    ny,
+                    0.0,
+                    0.0,
+                    tip_x,
+                    tip_y,
+                    right_rad.sin() * w,
+                    -right_rad.cos() * w,
+                );
+                blend(&mut pix, 0.18, 0.68, 0.86, cov_l * 0.85 * bg_alpha);
+                blend(&mut pix, 0.09, 0.42, 0.62, cov_r * 0.85 * bg_alpha);
+            }
+
+            // 8. Principal 4-point Cardinal Compass Rose (N, E, S, W), length 0.68
+            // East, South, West pointers in dual-tone cyan/white & deep teal
+            for &deg in &[90.0_f32, 180.0, 270.0] {
+                let rad = deg.to_radians();
+                let tip_x = rad.sin() * 0.66;
+                let tip_y = -rad.cos() * 0.66;
+                let left_rad = (deg - 45.0).to_radians();
+                let right_rad = (deg + 45.0).to_radians();
+                let w = 0.145;
+                let cov_l = triangle_coverage(
+                    nx,
+                    ny,
+                    0.0,
+                    0.0,
+                    tip_x,
+                    tip_y,
+                    left_rad.sin() * w,
+                    -left_rad.cos() * w,
+                );
+                let cov_r = triangle_coverage(
+                    nx,
+                    ny,
+                    0.0,
+                    0.0,
+                    tip_x,
+                    tip_y,
+                    right_rad.sin() * w,
+                    -right_rad.cos() * w,
+                );
+                blend(&mut pix, 0.88, 0.97, 1.00, cov_l * bg_alpha);
+                blend(&mut pix, 0.18, 0.62, 0.84, cov_r * bg_alpha);
+            }
+
+            // North pointer (0°) in high-visibility Marine Coral-Orange / Gold so North stands out!
+            {
+                let tip_x = 0.0;
+                let tip_y = -0.68;
+                let left_rad = (-45.0_f32).to_radians();
+                let right_rad = (45.0_f32).to_radians();
+                let w = 0.155;
+                let cov_l = triangle_coverage(
+                    nx,
+                    ny,
+                    0.0,
+                    0.0,
+                    tip_x,
+                    tip_y,
+                    left_rad.sin() * w,
+                    -left_rad.cos() * w,
+                );
+                let cov_r = triangle_coverage(
+                    nx,
+                    ny,
+                    0.0,
+                    0.0,
+                    tip_x,
+                    tip_y,
+                    right_rad.sin() * w,
+                    -right_rad.cos() * w,
+                );
+                blend(&mut pix, 1.00, 0.46, 0.18, cov_l * bg_alpha);
+                blend(&mut pix, 0.86, 0.24, 0.08, cov_r * bg_alpha);
+            }
+
+            // 9. Radar AIS target blip in the NE sweep sector (at (0.37, -0.32))
+            let blip_d = ((nx - 0.37).powi(2) + (ny + 0.32).powi(2)).sqrt();
+            let blip_glow = ((0.085 - blip_d) / 0.085).clamp(0.0, 1.0).powi(2);
+            blend(&mut pix, 0.20, 1.0, 0.55, blip_glow * 0.75 * bg_alpha);
+            let blip_core = ((0.036 - blip_d) / aa).clamp(0.0, 1.0);
+            blend(&mut pix, 0.75, 1.0, 0.88, blip_core * bg_alpha);
+
+            // 10. Center compass hub ring & jewel
+            let hub_outer = ((0.095 - r) / aa).clamp(0.0, 1.0);
+            blend(&mut pix, 0.05, 0.14, 0.24, hub_outer * bg_alpha);
+            let hub_inner = ((0.062 - r) / aa).clamp(0.0, 1.0);
+            blend(&mut pix, 0.30, 0.90, 1.00, hub_inner * bg_alpha);
+            let hub_dot = ((0.025 - r) / aa).clamp(0.0, 1.0);
+            blend(&mut pix, 1.0, 1.0, 1.0, hub_dot * bg_alpha);
+
+            let idx = ((y * size + x) * 4) as usize;
+            rgba[idx..idx + 4].copy_from_slice(&pix);
+        }
+    }
+
+    egui::IconData {
+        rgba,
+        width: size,
+        height: size,
+    }
+}
+
+/// Draws a compact vector NMEA Studio compass-radar emblem directly inside the UI toolbar.
+pub fn draw_app_logo_badge(ui: &mut Ui, size: f32) {
+    let (rect, _) = ui.allocate_exact_size(Vec2::splat(size), egui::Sense::hover());
+    if !ui.is_rect_visible(rect) {
+        return;
+    }
+    let painter = ui.painter_at(rect);
+    let c = rect.center();
+    let r = size * 0.46;
+
+    // Rounded badge background
+    painter.rect_filled(
+        rect.shrink(1.0),
+        egui::CornerRadius::same((size * 0.22) as u8),
+        Color32::from_rgb(10, 28, 48),
+    );
+    painter.rect_stroke(
+        rect.shrink(1.0),
+        egui::CornerRadius::same((size * 0.22) as u8),
+        egui::Stroke::new(1.2, Color32::from_rgb(50, 195, 245)),
+        egui::StrokeKind::Inside,
+    );
+
+    // Outer radar ring
+    painter.circle_stroke(
+        c,
+        r * 0.80,
+        egui::Stroke::new(1.0, Color32::from_rgb(45, 175, 225)),
+    );
+
+    // South / East / West compass points
+    let w = r * 0.22;
+    painter.add(egui::Shape::convex_polygon(
+        vec![
+            Pos2::new(c.x, c.y + r * 0.78),
+            Pos2::new(c.x - w, c.y),
+            Pos2::new(c.x + w, c.y),
+        ],
+        Color32::from_rgb(210, 240, 255),
+        egui::Stroke::NONE,
+    ));
+    painter.add(egui::Shape::convex_polygon(
+        vec![
+            Pos2::new(c.x - r * 0.75, c.y),
+            Pos2::new(c.x, c.y - w * 0.85),
+            Pos2::new(c.x, c.y + w * 0.85),
+        ],
+        Color32::from_rgb(75, 195, 240),
+        egui::Stroke::NONE,
+    ));
+    painter.add(egui::Shape::convex_polygon(
+        vec![
+            Pos2::new(c.x + r * 0.75, c.y),
+            Pos2::new(c.x, c.y - w * 0.85),
+            Pos2::new(c.x, c.y + w * 0.85),
+        ],
+        Color32::from_rgb(75, 195, 240),
+        egui::Stroke::NONE,
+    ));
+
+    // North pointer in bright coral-orange
+    painter.add(egui::Shape::convex_polygon(
+        vec![
+            Pos2::new(c.x, c.y - r * 0.82),
+            Pos2::new(c.x + w, c.y),
+            Pos2::new(c.x - w, c.y),
+        ],
+        Color32::from_rgb(255, 110, 45),
+        egui::Stroke::NONE,
+    ));
+
+    // Center hub
+    painter.circle_filled(c, r * 0.18, Color32::from_rgb(80, 230, 255));
+}
+
+/// Encodes an `egui::IconData` (RGBA8) into a standard PNG image byte buffer (using uncompressed zlib blocks).
+pub fn encode_rgba_to_png(icon: &egui::IconData) -> Vec<u8> {
+    fn crc32(data: &[u8]) -> u32 {
+        let mut crc = 0xFFFF_FFFFu32;
+        for &b in data {
+            crc ^= b as u32;
+            for _ in 0..8 {
+                if crc & 1 != 0 {
+                    crc = (crc >> 1) ^ 0xEDB8_8320;
+                } else {
+                    crc >>= 1;
+                }
+            }
+        }
+        !crc
+    }
+
+    fn write_chunk(out: &mut Vec<u8>, tag: &[u8; 4], data: &[u8]) {
+        out.extend_from_slice(&(data.len() as u32).to_be_bytes());
+        out.extend_from_slice(tag);
+        out.extend_from_slice(data);
+        let mut crc_buf = Vec::with_capacity(4 + data.len());
+        crc_buf.extend_from_slice(tag);
+        crc_buf.extend_from_slice(data);
+        out.extend_from_slice(&crc32(&crc_buf).to_be_bytes());
+    }
+
+    let w = icon.width;
+    let h = icon.height;
+    let mut raw_scanlines = Vec::with_capacity(((w * 4 + 1) * h) as usize);
+    for y in 0..h {
+        raw_scanlines.push(0u8); // Filter type 0 (None)
+        let row_start = (y * w * 4) as usize;
+        let row_end = row_start + (w * 4) as usize;
+        raw_scanlines.extend_from_slice(&icon.rgba[row_start..row_end]);
+    }
+
+    // Wrap raw_scanlines in valid zlib stream (stored blocks of up to 65535 bytes + Adler32)
+    let mut zlib = Vec::with_capacity(raw_scanlines.len() + 64);
+    zlib.push(0x78);
+    zlib.push(0x01);
+    let chunks: Vec<&[u8]> = raw_scanlines.chunks(65_535).collect();
+    for (i, chunk) in chunks.iter().enumerate() {
+        let is_last = i + 1 == chunks.len();
+        zlib.push(if is_last { 0x01 } else { 0x00 });
+        let len = chunk.len() as u16;
+        let nlen = !len;
+        zlib.extend_from_slice(&len.to_le_bytes());
+        zlib.extend_from_slice(&nlen.to_le_bytes());
+        zlib.extend_from_slice(chunk);
+    }
+    // Compute Adler-32 checksum
+    let mut s1 = 1u32;
+    let mut s2 = 0u32;
+    for &b in &raw_scanlines {
+        s1 = (s1 + b as u32) % 65_521;
+        s2 = (s2 + s1) % 65_521;
+    }
+    let adler = (s2 << 16) | s1;
+    zlib.extend_from_slice(&adler.to_be_bytes());
+
+    let mut png = Vec::with_capacity(zlib.len() + 128);
+    png.extend_from_slice(&[137, 80, 78, 71, 13, 10, 26, 10]); // PNG signature
+
+    let mut ihdr = Vec::with_capacity(13);
+    ihdr.extend_from_slice(&w.to_be_bytes());
+    ihdr.extend_from_slice(&h.to_be_bytes());
+    ihdr.extend_from_slice(&[8, 6, 0, 0, 0]); // 8-bit RGBA
+    write_chunk(&mut png, b"IHDR", &ihdr);
+    write_chunk(&mut png, b"IDAT", &zlib);
+    write_chunk(&mut png, b"IEND", &[]);
+    png
+}
+
+/// Encodes a multi-resolution Windows `.ico` file from `generate_app_logo_rgba` for the given sizes (e.g. `&[16, 32, 48, 64, 256]`).
+pub fn encode_app_logo_ico(sizes: &[u32]) -> Vec<u8> {
+    let mut payloads: Vec<(u32, Vec<u8>)> = Vec::with_capacity(sizes.len());
+    for &sz in sizes {
+        let icon = generate_app_logo_rgba(sz);
+        // 40-byte BITMAPINFOHEADER + bottom-up BGRA pixels + 32-bit aligned 1-bit AND mask
+        let w = sz as i32;
+        let h = (sz * 2) as i32; // doubled height in ICO DIB header
+        let xor_bytes = (sz * sz * 4) as usize;
+        let mask_row_bytes = ((sz + 31) / 32 * 4) as usize;
+        let and_bytes = mask_row_bytes * (sz as usize);
+        let mut dib = Vec::with_capacity(40 + xor_bytes + and_bytes);
+
+        dib.extend_from_slice(&40u32.to_le_bytes()); // biSize
+        dib.extend_from_slice(&w.to_le_bytes()); // biWidth
+        dib.extend_from_slice(&h.to_le_bytes()); // biHeight
+        dib.extend_from_slice(&1u16.to_le_bytes()); // biPlanes
+        dib.extend_from_slice(&32u16.to_le_bytes()); // biBitCount
+        dib.extend_from_slice(&0u32.to_le_bytes()); // biCompression (BI_RGB)
+        dib.extend_from_slice(&(xor_bytes as u32).to_le_bytes()); // biSizeImage
+        dib.extend_from_slice(&0i32.to_le_bytes()); // biXPelsPerMeter
+        dib.extend_from_slice(&0i32.to_le_bytes()); // biYPelsPerMeter
+        dib.extend_from_slice(&0u32.to_le_bytes()); // biClrUsed
+        dib.extend_from_slice(&0u32.to_le_bytes()); // biClrImportant
+
+        // Bottom-up BGRA pixel rows
+        for y in (0..sz).rev() {
+            for x in 0..sz {
+                let idx = ((y * sz + x) * 4) as usize;
+                let r = icon.rgba[idx];
+                let g = icon.rgba[idx + 1];
+                let b = icon.rgba[idx + 2];
+                let a = icon.rgba[idx + 3];
+                dib.extend_from_slice(&[b, g, r, a]);
+            }
+        }
+
+        // Bottom-up 1-bit AND transparency mask (1 = transparent when alpha == 0)
+        for y in (0..sz).rev() {
+            let mut row_mask = vec![0u8; mask_row_bytes];
+            for x in 0..sz {
+                let idx = ((y * sz + x) * 4) as usize;
+                if icon.rgba[idx + 3] == 0 {
+                    row_mask[(x / 8) as usize] |= 0x80 >> (x % 8);
+                }
+            }
+            dib.extend_from_slice(&row_mask);
+        }
+
+        payloads.push((sz, dib));
+    }
+
+    let count = payloads.len() as u16;
+    let mut ico = Vec::new();
+    ico.extend_from_slice(&0u16.to_le_bytes()); // Reserved
+    ico.extend_from_slice(&1u16.to_le_bytes()); // Type = 1 (ICO)
+    ico.extend_from_slice(&count.to_le_bytes()); // Image count
+
+    let mut offset = 6 + (payloads.len() as u32) * 16;
+    for (sz, data) in &payloads {
+        let dim_byte = if *sz >= 256 { 0u8 } else { *sz as u8 };
+        ico.push(dim_byte); // width
+        ico.push(dim_byte); // height
+        ico.push(0); // color count
+        ico.push(0); // reserved
+        ico.extend_from_slice(&1u16.to_le_bytes()); // color planes
+        ico.extend_from_slice(&32u16.to_le_bytes()); // bits per pixel
+        ico.extend_from_slice(&(data.len() as u32).to_le_bytes()); // size
+        ico.extend_from_slice(&offset.to_le_bytes()); // offset
+        offset += data.len() as u32;
+    }
+
+    for (_, data) in payloads {
+        ico.extend_from_slice(&data);
+    }
+    ico
+}
+
 /// Ultra-high-contrast semantic color palette that adapts automatically to the OS theme (Day Mode / Night Mode).
 #[derive(Debug, Clone, Copy)]
 pub struct ThemePalette {
@@ -885,8 +1380,9 @@ impl eframe::App for NmeaStudioApp {
             let pal = ThemePalette::from_ui(ui);
             ui.add_space(3.0);
             ui.horizontal(|ui| {
+                draw_app_logo_badge(ui, 22.0);
                 ui.heading(
-                    RichText::new("⚓ NMEA Studio")
+                    RichText::new("NMEA Studio")
                         .color(pal.accent)
                         .strong(),
                 );
@@ -4683,5 +5179,50 @@ mod tests {
                 missing
             );
         });
+    }
+
+    #[test]
+    fn test_generate_app_logo_rgba_and_icon_formats() {
+        let icon64 = generate_app_logo_rgba(64);
+        assert_eq!(icon64.width, 64);
+        assert_eq!(icon64.height, 64);
+        assert_eq!(icon64.rgba.len(), 64 * 64 * 4);
+        // Center pixel must be opaque
+        let center_idx = ((32 * 64 + 32) * 4) as usize;
+        assert_eq!(icon64.rgba[center_idx + 3], 255);
+        // Extreme corner pixel (0, 0) outside rounded squircle must be transparent
+        assert_eq!(icon64.rgba[3], 0);
+
+        let png_bytes = encode_rgba_to_png(&icon64);
+        assert!(png_bytes.starts_with(&[137, 80, 78, 71, 13, 10, 26, 10]));
+
+        let ico_bytes = encode_app_logo_ico(&[16, 32, 48, 64, 256]);
+        assert_eq!(&ico_bytes[0..6], &[0, 0, 1, 0, 5, 0]);
+
+        if std::env::var("GENERATE_ASSETS").is_ok() {
+            let assets_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets");
+            let _ = fs::create_dir_all(&assets_dir);
+            let icon512 = generate_app_logo_rgba(512);
+            fs::write(assets_dir.join("icon.png"), encode_rgba_to_png(&icon512)).unwrap();
+            fs::write(assets_dir.join("icon.ico"), &ico_bytes).unwrap();
+
+            let iconset_dir = assets_dir.join("AppIcon.iconset");
+            let _ = fs::create_dir_all(&iconset_dir);
+            for &(name, sz) in &[
+                ("icon_16x16.png", 16u32),
+                ("icon_16x16@2x.png", 32),
+                ("icon_32x32.png", 32),
+                ("icon_32x32@2x.png", 64),
+                ("icon_128x128.png", 128),
+                ("icon_128x128@2x.png", 256),
+                ("icon_256x256.png", 256),
+                ("icon_256x256@2x.png", 512),
+                ("icon_512x512.png", 512),
+                ("icon_512x512@2x.png", 1024),
+            ] {
+                let ic = generate_app_logo_rgba(sz);
+                fs::write(iconset_dir.join(name), encode_rgba_to_png(&ic)).unwrap();
+            }
+        }
     }
 }

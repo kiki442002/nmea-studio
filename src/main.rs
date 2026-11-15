@@ -10,9 +10,12 @@ use eframe::egui;
 use ui::NmeaStudioApp;
 
 fn main() -> eframe::Result<()> {
+    let icon = std::sync::Arc::new(ui::generate_app_logo_rgba(256));
     let native_options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("NMEA Studio - NMEA 0183 & NMEA 2000 Simulator & Analyzer")
+            .with_app_id("com.nmeastudio.app")
+            .with_icon(icon)
             .with_inner_size([1440.0, 900.0])
             .with_min_inner_size([1024.0, 680.0]),
         ..Default::default()

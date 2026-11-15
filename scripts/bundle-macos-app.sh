@@ -14,6 +14,7 @@ mkdir -p "${APP_DIR}/Contents/Resources"
 
 cp "target/release/nmea-studio" "${APP_DIR}/Contents/MacOS/nmea-studio"
 chmod +x "${APP_DIR}/Contents/MacOS/nmea-studio"
+cp "assets/AppIcon.icns" "${APP_DIR}/Contents/Resources/AppIcon.icns"
 
 cat > "${APP_DIR}/Contents/Info.plist" << 'EOF'
 <?xml version="1.0" encoding="UTF-8"?>
@@ -34,6 +35,8 @@ cat > "${APP_DIR}/Contents/Info.plist" << 'EOF'
     <string>APPL</string>
     <key>CFBundleExecutable</key>
     <string>nmea-studio</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
     <key>LSMinimumSystemVersion</key>
     <string>11.0</string>
     <key>NSHighResolutionCapable</key>
