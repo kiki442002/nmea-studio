@@ -2616,7 +2616,7 @@ impl NmeaStudioApp {
 
                         egui::Frame::group(ui.style()).show(ui, |ui| {
                             ui.heading("🎯 Gyrocompass, Heading & Attitude (AHRS)");
-                            let hdm = self.project.vessel.heading_magnetic_deg();
+                            let hdm = self.project.vessel.heading_magnetic();
                             let hdg_comp = (hdm - self.project.vessel.mag_dev_deg).rem_euclid(360.0);
                             egui::Grid::new("gyro_ahrs_grid")
                                 .num_columns(2)
