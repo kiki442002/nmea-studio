@@ -2521,7 +2521,7 @@ impl NmeaStudioApp {
 
                 // Second Row: Detailed Sensor Parameter Sliders in 2 Columns
                 ui.columns(2, |cols| {
-                    // LEFT COLUMN: Position, Speed, Heading, Depth & Water
+                    // LEFT COLUMN: 1. GNSS, 2. Gyro / Heading & Attitude, 3. Depth & Speed Log
                     cols[0].vertical(|ui| {
                         egui::Frame::group(ui.style()).show(ui, |ui| {
                             ui.heading("🌐 GNSS Position, Course & Speed");
@@ -2564,20 +2564,36 @@ impl NmeaStudioApp {
                                     );
                                     ui.end_row();
 
+                                    ui.label("Altitude / Satellites / HDOP:");
+                                    ui.horizontal(|ui| {
+                                        ui.add(
+                                            egui::DragValue::new(
+                                                &mut self.project.vessel.altitude_m,
+                                            )
+                                            .speed(0.2)
+                                            .prefix("Alt ")
+                                            .suffix(" m"),
+                                        );
+                                        ui.add(
+                                            egui::DragValue::new(
+                                                &mut self.project.vessel.satellites_in_use,
+                                            )
+                                            .range(0..=32)
+                                            .prefix("Sats "),
+                                        );
+                                        ui.add(
+                                            egui::DragValue::new(&mut self.project.vessel.hdop)
+                                                .speed(0.05)
+                                                .range(0.4..=10.0)
+                                                .prefix("HDOP "),
+                                        );
+                                    });
+                                    ui.end_row();
+
                                     ui.label("Speed Over Ground (SOG):");
                                     ui.add(
                                         egui::Slider::new(
                                             &mut self.project.vessel.sog_knots,
-                                            0.0..=45.0,
-                                        )
-                                        .suffix(" kn"),
-                                    );
-                                    ui.end_row();
-
-                                    ui.label("Speed Through Water (STW):");
-                                    ui.add(
-                                        egui::Slider::new(
-                                            &mut self.project.vessel.stw_knots,
                                             0.0..=45.0,
                                         )
                                         .suffix(" kn"),
@@ -2593,7 +2609,19 @@ impl NmeaStudioApp {
                                         .suffix(" °T"),
                                     );
                                     ui.end_row();
+                                });
+                        });
 
+                        ui.add_space(8.0);
+
+                        egui::Frame::group(ui.style()).show(ui, |ui| {
+                            ui.heading("🎯 Gyrocompass, Heading & Attitude (AHRS)");
+                            let hdm = self.project.vessel.heading_magnetic_deg();
+                            let hdg_comp = (hdm - self.project.vessel.mag_dev_deg).rem_euclid(360.0);
+                            egui::Grid::new("gyro_ahrs_grid")
+                                .num_columns(2)
+                                .spacing([12.0, 6.0])
+                                .show(ui, |ui| {
                                     ui.label("True Heading (HDT):");
                                     ui.add(
                                         egui::Slider::new(
@@ -2604,23 +2632,16 @@ impl NmeaStudioApp {
                                     );
                                     ui.end_row();
 
-                                    ui.label("Rate of Turn (ROT):");
+                                    ui.label("Computed Magnetic / Compass:");
                                     ui.add(
-                                        egui::Slider::new(
-                                            &mut self.project.vessel.rot_deg_per_min,
-                                            -60.0..=60.0,
+                                        egui::Label::new(
+                                            RichText::new(format!(
+                                                "HDM: {:05.1}°M  |  HDG: {:05.1}°C",
+                                                hdm, hdg_comp
+                                            ))
+                                            .monospace(),
                                         )
-                                        .suffix(" °/min"),
-                                    );
-                                    ui.end_row();
-
-                                    ui.label("Rudder Angle:");
-                                    ui.add(
-                                        egui::Slider::new(
-                                            &mut self.project.vessel.rudder_angle_deg,
-                                            -35.0..=35.0,
-                                        )
-                                        .suffix(" °"),
+                                        .truncate(),
                                     );
                                     ui.end_row();
 
@@ -2644,18 +2665,68 @@ impl NmeaStudioApp {
                                         );
                                     });
                                     ui.end_row();
+
+                                    ui.label("Rate of Turn (ROT):");
+                                    ui.add(
+                                        egui::Slider::new(
+                                            &mut self.project.vessel.rot_deg_per_min,
+                                            -60.0..=60.0,
+                                        )
+                                        .suffix(" °/min"),
+                                    );
+                                    ui.end_row();
+
+                                    ui.label("Rudder Angle (RSA):");
+                                    ui.add(
+                                        egui::Slider::new(
+                                            &mut self.project.vessel.rudder_angle_deg,
+                                            -35.0..=35.0,
+                                        )
+                                        .suffix(" °"),
+                                    );
+                                    ui.end_row();
+
+                                    ui.label("Pitch (Bow Up+ / Down-):");
+                                    ui.add(
+                                        egui::Slider::new(
+                                            &mut self.project.vessel.pitch_deg,
+                                            -25.0..=25.0,
+                                        )
+                                        .suffix(" °"),
+                                    );
+                                    ui.end_row();
+
+                                    ui.label("Roll (Stbd+ / Port-):");
+                                    ui.add(
+                                        egui::Slider::new(
+                                            &mut self.project.vessel.roll_deg,
+                                            -35.0..=35.0,
+                                        )
+                                        .suffix(" °"),
+                                    );
+                                    ui.end_row();
+
+                                    ui.label("Vertical Heave:");
+                                    ui.add(
+                                        egui::Slider::new(
+                                            &mut self.project.vessel.heave_m,
+                                            -5.0..=5.0,
+                                        )
+                                        .suffix(" m"),
+                                    );
+                                    ui.end_row();
                                 });
                         });
 
                         ui.add_space(8.0);
 
                         egui::Frame::group(ui.style()).show(ui, |ui| {
-                            ui.heading("🌊 Depth, Bathymetry & Attitude");
+                            ui.heading("🌊 Depth Sounder & Speed Log");
                             egui::Grid::new("depth_grid")
                                 .num_columns(2)
                                 .spacing([12.0, 6.0])
                                 .show(ui, |ui| {
-                                    ui.label("Depth Below Transducer:");
+                                    ui.label("Depth Below Transducer (DBT):");
                                     ui.add(
                                         egui::Slider::new(
                                             &mut self.project.vessel.depth_below_transducer_m,
@@ -2663,6 +2734,19 @@ impl NmeaStudioApp {
                                         )
                                         .logarithmic(true)
                                         .suffix(" m"),
+                                    );
+                                    ui.end_row();
+
+                                    ui.label("Computed Surface / Keel:");
+                                    ui.add(
+                                        egui::Label::new(
+                                            RichText::new(format!(
+                                                "DBS: {:5.1} m  |  DBK: {:5.1} m",
+                                                m.depth_surface_m, m.depth_keel_m
+                                            ))
+                                            .monospace(),
+                                        )
+                                        .truncate(),
                                     );
                                     ui.end_row();
 
@@ -2687,7 +2771,17 @@ impl NmeaStudioApp {
                                     });
                                     ui.end_row();
 
-                                    ui.label("Water Temperature:");
+                                    ui.label("Speed Through Water (STW):");
+                                    ui.add(
+                                        egui::Slider::new(
+                                            &mut self.project.vessel.stw_knots,
+                                            0.0..=45.0,
+                                        )
+                                        .suffix(" kn"),
+                                    );
+                                    ui.end_row();
+
+                                    ui.label("Water Temperature (MTW):");
                                     ui.add(
                                         egui::Slider::new(
                                             &mut self.project.vessel.water_temp_c,
@@ -2695,27 +2789,6 @@ impl NmeaStudioApp {
                                         )
                                         .suffix(" °C"),
                                     );
-                                    ui.end_row();
-
-                                    ui.label("Pitch / Roll Attitude:");
-                                    ui.horizontal(|ui| {
-                                        ui.add(
-                                            egui::DragValue::new(
-                                                &mut self.project.vessel.pitch_deg,
-                                            )
-                                            .speed(0.2)
-                                            .range(-25.0..=25.0)
-                                            .prefix("Pitch ")
-                                            .suffix("°"),
-                                        );
-                                        ui.add(
-                                            egui::DragValue::new(&mut self.project.vessel.roll_deg)
-                                                .speed(0.2)
-                                                .range(-35.0..=35.0)
-                                                .prefix("Roll ")
-                                                .suffix("°"),
-                                        );
-                                    });
                                     ui.end_row();
                                 });
                         });

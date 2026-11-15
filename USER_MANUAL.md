@@ -129,10 +129,11 @@ The **`☸ Helm & Sensors`** tab displays **3 interactive graphical gauges** at 
 3. **Echo Sounder Bathymetry, Artificial Horizon & Rudder Strip (`BATHYMETRY / PITCH-ROLL / RUDDER`)**:
    - Shows a scrolling seabed depth profile, live pitch/roll horizon indicator, and port/starboard rudder angle bar.
 4. **Sensor Control Panels**:
-   - **Position, Course & Speed**: Latitude, Longitude, `SOG`, `STW`, `HDG`, `COG`, `ROT`, magnetic variation, rudder angle, GNSS `Fix Quality`, `Satellites`, and `HDOP`.
-   - **Wind & Meteorology**: `TWS`, `TWD`, barometric pressure (`hPa`), air temperature, and relative humidity.
-   - **Bathymetry & Attitude**: Depth below transducer (`DBT`), transducer draft/keel offsets, water temperature (`MTW`), `Roll`, and `Pitch`.
-   - **Propulsion, Electrical & Wave Jitter**: Engine `RPM`, coolant temperature, oil pressure, fuel rate (`L/h`), fuel level (`%`), battery voltage (`V`), and realistic wave/sensor jitter amplitude.
+   - **🌐 GNSS Position, Course & Speed**: Vessel name/callsign, Latitude, Longitude, Altitude (`m`), `SOG`, `COG`, `Satellites`, and `HDOP`.
+   - **🎯 Gyrocompass, Heading & Attitude (AHRS)**: True Heading (`HDT`), live computed Magnetic (`HDM`) and Compass (`HDG`) headings, Magnetic Variation and Deviation, Rate of Turn (`ROT`), Rudder Angle (`RSA`), `Pitch`, `Roll`, and Vertical `Heave`.
+   - **🌊 Depth Sounder & Speed Log**: Depth below transducer (`DBT`), live computed depth below surface (`DBS`) and keel (`DBK`), transducer/keel offsets, Speed Through Water (`STW`), and Water Temperature (`MTW`).
+   - **💨 Wind & Meteorology**: `TWS`, `TWD`, computed Apparent Wind (`AWS`/`AWA`), barometric pressure (`hPa`), air temperature, and relative humidity.
+   - **⚙ Propulsion, Electrical & Wave Jitter**: Engine `RPM`, coolant temperature, oil pressure, fuel rate (`L/h`), fuel level (`%`), battery voltage (`V`), and realistic wave/sensor jitter amplitude.
 
 ---
 
