@@ -117,8 +117,22 @@ jobs:
           </plist>
           EOF
 
+          # Strip any extended attributes and re-sign the entire .app bundle (including Info.plist)
+          xattr -cr "${APP_DIR}"
+          codesign --force --deep --sign - "${APP_DIR}"
+          codesign --verify --deep --strict --verbose=2 "${APP_DIR}"
+
           ditto -c -k --sequesterRsrc --keepParent "${APP_DIR}" "dist/${{ matrix.artifact_name }}.app.zip"
-          hdiutil create -volname "NMEA Studio" -srcfolder "${APP_DIR}" -ov -format UDZO "dist/${{ matrix.artifact_name }}.dmg"
+
+          # Stage DMG root with "NMEA Studio.app" + "/Applications" symlink for drag-and-drop install
+          DMG_STAGE="dist/dmg_stage"
+          rm -rf "${DMG_STAGE}"
+          mkdir -p "${DMG_STAGE}"
+          cp -R "${APP_DIR}" "${DMG_STAGE}/NMEA Studio.app"
+          ln -s /Applications "${DMG_STAGE}/Applications"
+
+          hdiutil create -volname "NMEA Studio" -srcfolder "${DMG_STAGE}" -ov -format UDZO "dist/${{ matrix.artifact_name }}.dmg"
+          codesign --force --sign - "dist/${{ matrix.artifact_name }}.dmg"
 
       # Windows: Package GUI .exe (compiled with windows_subsystem = "windows")
       - name: Package Windows .zip

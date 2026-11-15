@@ -44,5 +44,21 @@ cat > "${APP_DIR}/Contents/Info.plist" << 'EOF'
 </plist>
 EOF
 
-echo "Created macOS application bundle at: ${APP_DIR}"
-echo "You can now double-click '${APP_DIR}' in Finder or copy it to /Applications."
+xattr -cr "${APP_DIR}"
+codesign --force --deep --sign - "${APP_DIR}"
+codesign --verify --deep --strict "${APP_DIR}"
+
+# Stage DMG folder with "NMEA Studio.app" and "/Applications" symlink for drag-and-drop install
+DMG_STAGE="dist/dmg_stage"
+DMG_PATH="dist/NMEA-Studio-macOS.dmg"
+rm -rf "${DMG_STAGE}" "${DMG_PATH}"
+mkdir -p "${DMG_STAGE}"
+cp -R "${APP_DIR}" "${DMG_STAGE}/NMEA Studio.app"
+ln -s /Applications "${DMG_STAGE}/Applications"
+
+hdiutil create -volname "NMEA Studio" -srcfolder "${DMG_STAGE}" -ov -format UDZO "${DMG_PATH}"
+codesign --force --sign - "${DMG_PATH}"
+rm -rf "${DMG_STAGE}"
+
+echo "Created and signed macOS application bundle at: ${APP_DIR}"
+echo "Created drag-and-drop DMG installer at: ${DMG_PATH}"
